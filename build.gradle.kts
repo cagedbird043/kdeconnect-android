@@ -98,6 +98,24 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+
+    // kdeconnect+：包名、版本号与发布签名，规则见 PLUS.md
+    val plusRelease = providers.gradleProperty("plusRelease").orNull?.toInt() ?: 0
+    require(plusRelease in 0..99) { "plusRelease must be within 0..99" }
+    defaultConfig {
+        applicationId = "top.miceworld.kdeconnectplus"
+        versionCode = versionCode!! * 100 + plusRelease
+        versionName = "$versionName-plus.$plusRelease"
+    }
+    providers.environmentVariable("PLUS_KEYSTORE_FILE").orNull?.let { keystore ->
+        val plusSigning = signingConfigs.create("plus") {
+            storeFile = file(keystore)
+            storePassword = providers.environmentVariable("PLUS_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("PLUS_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("PLUS_KEY_PASSWORD").get()
+        }
+        buildTypes.getByName("release").signingConfig = plusSigning
+    }
 }
 
 /**
