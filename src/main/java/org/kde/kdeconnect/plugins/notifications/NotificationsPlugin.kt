@@ -205,8 +205,8 @@ class NotificationsPlugin : Plugin(), NotificationReceiver.NotificationListener 
             }
         }
 
-        if ("org.kde.kdeconnect_tp" == packageName || "org.kde.kdeconnect_tp.debug" == packageName) {
-            // Don't send our own notifications
+        // kdeconnect+：按实际包名过滤自身通知，兼容 plus 包名
+        if (context.packageName == packageName) {
             return
         }
 

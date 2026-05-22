@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- kdeconnect+ 专属字符串，规则见 PLUS.md -->
+<resources>
+    <string name="kde_connect_plus" translatable="false">KDE Connect+</string>
+</resources>
