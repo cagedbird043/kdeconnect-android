@@ -74,7 +74,7 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <application
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="@string/kde_connect"
+        android:label="@string/kde_connect_plus"
         android:banner="@mipmap/ic_launcher_banner"
         android:supportsRtl="true"
         android:allowBackup="false"
@@ -469,7 +469,7 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
         </service>
 
         <service android:name="org.kde.kdeconnect.plugins.runcommand.RunCommandControlsProviderService"
-            android:label="@string/kde_connect"
+            android:label="@string/kde_connect_plus"
             android:exported="true"
             android:permission="android.permission.BIND_CONTROLS">
             <intent-filter>
