@@ -1,5 +1,16 @@
 # KDE Connect - Android app
 
+<!-- kdeconnect+：下游专属段落，跟进官方时保留 -->
+> [!NOTE]
+> **这里是 KDE Connect+**：个人维护的下游版本，基于官方正式版，额外支持通过 Shizuku 在后台双向同步剪贴板：手机上复制自动发到电脑，电脑发来的内容在 ColorOS 等限制后台写剪贴板的系统上也能写入。
+> 包名 `top.miceworld.kdeconnectplus`，可与官方版同时安装。维护规则见 [PLUS.md](PLUS.md)。
+>
+> **安装与更新**：用 [Obtainium](https://github.com/ImranR98/Obtainium) 订阅本仓库，新版本发布后会自动提示更新。
+> - 手机上已装 Obtainium：[一键添加](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/cagedbird043/kdeconnect-android)
+> - 或在 Obtainium「添加应用」里填入 `https://github.com/cagedbird043/kdeconnect-android`
+> - 也可以直接从 [Releases](https://github.com/cagedbird043/kdeconnect-android/releases/latest) 下载 APK
+<!-- /kdeconnect+ -->
+
 KDE Connect is a multi-platform app that allows your devices to communicate (eg: your phone and your computer).
 
 ## (Some) Features
