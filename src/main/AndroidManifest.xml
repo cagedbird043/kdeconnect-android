@@ -72,6 +72,9 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- kdeconnect+：Shizuku-API 的 minSdk 是 24，Shizuku 功能只在 Android 10+ 启用，规则见 PLUS.md -->
+    <uses-sdk tools:overrideLibrary="rikka.shizuku.api,rikka.shizuku.shared,rikka.shizuku.aidl" />
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -472,6 +475,15 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
                 <action android:name="android.service.controls.ControlsProviderService" />
             </intent-filter>
         </service>
+
+        <!-- kdeconnect+：接收 Shizuku 的 binder，规则见 PLUS.md -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="@bool/plus_shizuku_enabled"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
 </manifest>
