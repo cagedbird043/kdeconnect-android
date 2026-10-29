@@ -1,0 +1,102 @@
+# kdeconnect+：编译签名的 release APK，发布为 GitHub Release（供 Obtainium 订阅）。
+# 版本号 X.Y.Z-plus.N：X.Y.Z 是 cagedbird/plus 所基于的官方 tag，N 在已有 Release 的基础上加一。
+# 由 plus-follow 触发，也可以手动运行。规则见 PLUS.md。
+name: plus-release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: plus-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_URL: https://invent.kde.org/network/kdeconnect-android.git
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require cagedbird/plus
+        if: github.ref != 'refs/heads/cagedbird/plus'
+        run: |
+          echo "::error::plus-release only runs on cagedbird/plus."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          git fetch --no-tags "$UPSTREAM_URL" '+refs/tags/v*:refs/tags/v*'
+          base="$(.github/plus/upstream-tag.sh base)"
+          prefix="${base}-plus."
+          last="$(gh release list -R "$REPO" --limit 1000 --json tagName --jq '.[].tagName' \
+            | sed -n "s/^${prefix//./\\.}\([0-9]\+\)$/\1/p" | sort -n | tail -n1)"
+          n=$(( ${last:-0} + 1 ))
+          {
+            echo "n=$n"
+            echo "tag=${prefix}${n}"
+            echo "name=${base#v}-plus.${n}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build signed release APK
+        env:
+          N: ${{ steps.version.outputs.n }}
+          KEYSTORE_BASE64: ${{ secrets.PLUS_KEYSTORE_BASE64 }}
+          PLUS_KEYSTORE_PASSWORD: ${{ secrets.PLUS_KEYSTORE_PASSWORD }}
+          PLUS_KEY_ALIAS: ${{ secrets.PLUS_KEY_ALIAS }}
+          PLUS_KEY_PASSWORD: ${{ secrets.PLUS_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Repository secret PLUS_KEYSTORE_BASE64 is missing."
+            exit 1
+          fi
+          export PLUS_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$PLUS_KEYSTORE_FILE"
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease -PplusRelease="$N"
+          rm -f "$PLUS_KEYSTORE_FILE"
+
+      - name: Verify APK
+        id: apk
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          apk="kdeconnect-plus-${NAME}.apk"
+          cp build/outputs/apk/release/kdeconnect-android-release.apk "$apk"
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+          "$build_tools/apksigner" verify --print-certs "$apk" | tee -a "$GITHUB_STEP_SUMMARY"
+          "$build_tools/aapt2" dump badging "$apk" | head -n1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "file=$apk" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          NAME: ${{ steps.version.outputs.name }}
+          FILE: ${{ steps.apk.outputs.file }}
+          REPO: ${{ github.repository }}
+        run: |
+          base="$(.github/plus/upstream-tag.sh base)"
+          notes="$(mktemp)"
+          {
+            echo "基于官方 KDE Connect Android ${base}。"
+            echo
+            echo "plus 补丁："
+            git log --reverse --format='- %s' "$base..HEAD"
+          } > "$notes"
+          gh release create "$TAG" "$FILE" -R "$REPO" --target "$(git rev-parse HEAD)" \
+            --title "KDE Connect+ $NAME" --notes-file "$notes"

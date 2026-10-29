@@ -1,0 +1,106 @@
+# kdeconnect+：每天检查官方（invent.kde.org）有没有新的正式版本 tag，有就把 plus 补丁 rebase 上去、
+# 编译测试、推送 cagedbird/plus 并触发 plus-release。一次只前进一个 tag。
+# 任何一步失败都会停用本工作流，等人工处理后再手动启用。规则见 PLUS.md。
+name: plus-follow
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: plus-follow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  UPSTREAM_URL: https://invent.kde.org/network/kdeconnect-android.git
+  BRANCH: cagedbird/plus
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  follow:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require PLUS_DEPLOY_KEY
+        env:
+          DEPLOY_KEY: ${{ secrets.PLUS_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::Repository secret PLUS_DEPLOY_KEY is missing (write deploy key)."
+            exit 1
+          fi
+
+      # 用部署钥匙推送：官方 tag 之间可能改动 .github/workflows/，GITHUB_TOKEN 推不了。
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.PLUS_DEPLOY_KEY }}
+
+      - name: Select next upstream tag
+        id: select
+        run: |
+          git fetch --no-tags "$UPSTREAM_URL" '+refs/tags/v*:refs/tags/v*'
+          .github/plus/upstream-tag.sh select | tee -a "$GITHUB_OUTPUT"
+
+      - name: Rebase onto the new tag
+        id: rebase
+        if: steps.select.outputs.next != ''
+        env:
+          BASE: ${{ steps.select.outputs.base }}
+          NEXT: ${{ steps.select.outputs.next }}
+        run: |
+          git config user.name cagedbird043
+          git config user.email cagedbird043@gmail.com
+          echo "old=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git rebase --onto "$NEXT" "$BASE" "$BRANCH"
+          echo "new=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Rebased $BRANCH from $BASE onto $NEXT" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-java@v4
+        if: steps.select.outputs.next != ''
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.select.outputs.next != ''
+
+      - name: Build and test
+        if: steps.select.outputs.next != ''
+        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest
+
+      - name: Push
+        if: steps.select.outputs.next != ''
+        env:
+          OLD: ${{ steps.rebase.outputs.old }}
+        run: git push --force-with-lease="$BRANCH:$OLD" origin "$BRANCH"
+
+      - name: Release
+        if: steps.select.outputs.next != ''
+        env:
+          NEW: ${{ steps.rebase.outputs.new }}
+          REPO: ${{ github.repository }}
+        run: |
+          started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run plus-release.yml --ref "$BRANCH" -R "$REPO"
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list -R "$REPO" --workflow plus-release.yml --event workflow_dispatch --branch "$BRANCH" \
+              --json databaseId,headSha,createdAt \
+              --jq "[.[] | select(.headSha == \"$NEW\" and .createdAt >= \"$started\")] | sort_by(.createdAt) | last | .databaseId // empty")"
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          [ -n "$run_id" ] || { echo "plus-release run did not appear"; exit 1; }
+          echo "plus-release run: $run_id" >> "$GITHUB_STEP_SUMMARY"
+          gh run watch "$run_id" -R "$REPO" --exit-status
+
+      - name: Disable plus-follow after failure
+        if: failure()
+        env:
+          REPO: ${{ github.repository }}
+        run: gh workflow disable plus-follow.yml -R "$REPO"
