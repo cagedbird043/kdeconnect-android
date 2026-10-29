@@ -121,6 +121,8 @@ android {
         kotlin.directories += "plus/shizuku-clipboard/src/main/java"
         aidl.directories += "plus/shizuku-clipboard/src/main/aidl"
         res.directories += "plus/shizuku-clipboard/src/main/res"
+        kotlin.directories += "plus/reconnect/src/main/java"
+        res.directories += "plus/reconnect/src/main/res"
     }
     sourceSets.getByName("test") {
         kotlin.directories += "plus/shizuku-clipboard/src/test/java"

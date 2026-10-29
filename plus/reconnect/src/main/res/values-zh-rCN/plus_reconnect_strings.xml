@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plus_reconnect">重连</string>
+    <string name="plus_reconnecting">正在连接…</string>
+</resources>

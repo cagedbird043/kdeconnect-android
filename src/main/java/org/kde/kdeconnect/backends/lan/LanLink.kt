@@ -25,6 +25,7 @@ import org.kde.kdeconnect.helpers.LineTooLongException
 import org.kde.kdeconnect.helpers.ThreadHelper
 import org.kde.kdeconnect.helpers.readLineBounded
 import org.kde.kdeconnect.helpers.security.SslHelper.convertToSslSocket
+import top.miceworld.kdeconnectplus.reconnect.LoopbackPayloadAddress // kdeconnect+：本机代理后的载荷地址回退
 import java.io.BufferedInputStream
 import java.io.IOException
 import java.io.OutputStream
@@ -45,6 +46,10 @@ class LanLink(
 ) : BaseLink(context, linkProvider) {
 
     override val name = "LanLink"
+
+    // kdeconnect+：依据当前 socket 判断路径，reset 后立即反映 LAN 升级。
+    internal val isLoopback: Boolean
+        get() = socket.inetAddress.isLoopbackAddress
 
     override fun disconnect() {
         Log.i(LOG_TAG, "Disconnect socket: ${socket.hashCode()}")
@@ -230,6 +235,23 @@ class LanLink(
     }
 
     private fun receivedNetworkPacket(np: NetworkPacket) {
+        // kdeconnect+：仅本机代理连接用自定义 IP 寻找载荷发送端，其余连接保持官方流程
+        if (np.hasPayloadTransferInfo() && socket.inetAddress.isLoopbackAddress) {
+            var payloadSocket: Socket? = null
+            try {
+                val tcpPort = np.payloadTransferInfo.getValue("port").jsonPrimitive.int
+                payloadSocket = LoopbackPayloadAddress.connect(
+                    context, deviceId, tcpPort, (linkProvider as LanLinkProvider).customDeviceAddresses,
+                )
+                np.payload = NetworkPacket.Payload(payloadSocket, np.payloadSize)
+            } catch (e: Exception) {
+                payloadSocket?.closeSafe()
+                Log.e(LOG_TAG, "Exception connecting to payload remote socket", e)
+            }
+            packetReceived(np)
+            return
+        }
+
         if (np.hasPayloadTransferInfo()) {
             var payloadSocket = Socket()
             try {

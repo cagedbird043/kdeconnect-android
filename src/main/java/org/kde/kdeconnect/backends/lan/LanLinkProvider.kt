@@ -32,6 +32,9 @@ import org.kde.kdeconnect.helpers.isPrivateAddress
 import org.kde.kdeconnect.helpers.readLineBounded
 import org.kde.kdeconnect.helpers.security.SslHelper
 import org.kde.kdeconnect.ui.CustomDevicesActivity
+import top.miceworld.kdeconnectplus.reconnect.CustomDeviceRetry
+import top.miceworld.kdeconnectplus.reconnect.LanLinkPreference // kdeconnect+：回环连接优先升级到 LAN
+import top.miceworld.kdeconnectplus.reconnect.LoopbackPayloadAddress // kdeconnect+：本机代理后的载荷地址回退
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -57,24 +60,46 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
 
     private val lastConnectionTimeByDeviceId = ConcurrentHashMap<String, Long>()
     private val lastConnectionTimeByIp = ConcurrentHashMap<InetAddress, Long>()
+    // kdeconnect+：回环与 LAN 分开限速，避免 tailnet 的身份包挡住 LAN 升级。
+    private val lastLoopbackConnectionTimeByDeviceId = ConcurrentHashMap<String, Long>()
 
     private val customDevicePreferences: SharedPreferences =
         context.getSharedPreferences(context.packageName + "_preferences", Context.MODE_PRIVATE)
 
+    // kdeconnect+：只读暴露已解析的自定义地址，供本机代理连接的载荷回退使用
     @Volatile
-    private var customDeviceAddresses = emptyList<InetAddress>()
+    internal var customDeviceAddresses = emptyList<InetAddress>()
+        private set
+
+    // kdeconnect+：断线时重试自定义 IP；已连接但只走回环时，独立探测 LAN，见 plus/reconnect。
+    private val customDeviceRetry = CustomDeviceRetry(
+        context,
+        hasCustomDevices = { customDeviceAddresses.isNotEmpty() },
+        sendToCustomDevices = { broadcastUdpIdentityPacket(null, customDevicesOnly = true) },
+        lanPreference = LanLinkPreference(
+            context,
+            isLoopbackLink = { visibleDevices[it]?.isLoopback == true },
+            sendIdentity = ::sendUdpIdentityPacket,
+        ),
+    )
 
     private val customDeviceListener = OnSharedPreferenceChangeListener { _, key ->
         if (key == CustomDevicesActivity.KEY_CUSTOM_DEVICE_LIST_PREFERENCE) {
+            LoopbackPayloadAddress.clear() // kdeconnect+：自定义设备配置变化后忘记旧载荷地址
             updateCustomDevicesList()
         }
     }
 
     fun updateCustomDevicesList() {
-        customDeviceAddresses = CustomDevicesActivity.getCustomDeviceList(context).flatMap {
+        val addresses = CustomDevicesActivity.getCustomDeviceList(context).flatMap {
             runCatching {
                 InetAddress.getAllByName(it.host).toList()
             }.getOrDefault(emptyList())
+        }
+        // kdeconnect+：解析结果变化（含 DNS 变化）时也忘记旧载荷地址，不因重复广播清空记忆
+        if (addresses != customDeviceAddresses) {
+            LoopbackPayloadAddress.clear()
+            customDeviceAddresses = addresses
         }
     }
 
@@ -96,10 +121,12 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
         // Do not let an old connection remove its replacement.
         if (visibleDevices.remove(deviceId, link)) {
             super.onConnectionLost(link)
+            customDeviceRetry.onLinksChanged(lanDowngraded = false) // kdeconnect+：停止或重新评估 LAN 探测
         }
     }
 
-    fun unserializeReceivedIdentityPacket(message: String): Pair<NetworkPacket, Boolean>? {
+    // kdeconnect+：带入来源地址，区分回环限速与 LAN 升级。
+    fun unserializeReceivedIdentityPacket(message: String, address: InetAddress): Pair<NetworkPacket, Boolean>? {
         val identityPacket: NetworkPacket?
         try {
             identityPacket = unserialize(message)
@@ -120,7 +147,7 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
             return null
         }
 
-        if (rateLimitByDeviceId(deviceId)) {
+        if (rateLimitByDeviceId(deviceId, address)) {
             Log.i("LanLinkProvider", "Discarding second packet from the same device $deviceId received too quickly")
             return null
         }
@@ -140,7 +167,8 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     private fun tcpPacketReceived(socket: Socket) {
         val address = socket.getInetAddress()
 
-        if (rateLimitByIp(address)) {
+        // kdeconnect+：经本机代理（如 sing-box）进来的连接都来自 127.0.0.1，不按 IP 限速，只按设备 ID 限速
+        if (!address.isLoopbackAddress && rateLimitByIp(address)) {
             Log.i("LanLinkProvider", "Discarding second TCP packet from the same ip $address received too quickly" )
             socket.closeSafe()
             return
@@ -165,7 +193,7 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
             return
         }
 
-        val (identityPacket, deviceTrusted)  = unserializeReceivedIdentityPacket(message) ?: run {
+        val (identityPacket, deviceTrusted)  = unserializeReceivedIdentityPacket(message, address) ?: run { // kdeconnect+
             socket.closeSafe()
             return
         }
@@ -205,15 +233,17 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
         return false
     }
 
-    fun rateLimitByDeviceId(deviceId: String): Boolean {
+    // kdeconnect+：保留每条路径的设备 ID 限速，不让回环流量消耗 LAN 的额度。
+    fun rateLimitByDeviceId(deviceId: String, address: InetAddress): Boolean {
+        val times = if (address.isLoopbackAddress) lastLoopbackConnectionTimeByDeviceId else lastConnectionTimeByDeviceId
         val now = SystemClock.elapsedRealtime()
-        val last = lastConnectionTimeByDeviceId[deviceId]
+        val last = times[deviceId]
         if (last != null && (last + MILLIS_DELAY_BETWEEN_CONNECTIONS_TO_SAME_DEVICE > now)) {
             return true
         }
-        lastConnectionTimeByDeviceId[deviceId] = now
-        if (lastConnectionTimeByDeviceId.size > MAX_RATE_LIMIT_ENTRIES) {
-            lastConnectionTimeByDeviceId.entries.removeIf { it.value + MILLIS_DELAY_BETWEEN_CONNECTIONS_TO_SAME_DEVICE < now }
+        times[deviceId] = now
+        if (times.size > MAX_RATE_LIMIT_ENTRIES) {
+            times.entries.removeIf { it.value + MILLIS_DELAY_BETWEEN_CONNECTIONS_TO_SAME_DEVICE < now }
         }
         return false
     }
@@ -223,7 +253,7 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     private fun udpPacketReceived(packet: DatagramPacket) {
         val address = packet.address
 
-        if (rateLimitByIp(address)) {
+        if (!address.isLoopbackAddress && rateLimitByIp(address)) { // kdeconnect+：同上
             Log.i("LanLinkProvider", "Discarding second UDP packet from the same ip $address received too quickly")
             return
         }
@@ -235,10 +265,19 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
 
         val message = String(packet.data, 0, packet.length, Charsets.UTF_8)
 
-        val (identityPacket, deviceTrusted) = unserializeReceivedIdentityPacket(message)
+        val (identityPacket, deviceTrusted) = unserializeReceivedIdentityPacket(message, address) // kdeconnect+
             ?: return
 
         Log.i("KDE/LanLinkProvider", "Broadcast identity packet received from ${identityPacket.getString("deviceName")}")
+
+        // kdeconnect+：来自 127.0.0.1 的包原始地址已丢失，回连只会连到自己；改为让对方来连我们。
+        // 这个包没有用来建立连接，撤销它的限速登记，否则对方紧接着发来的 TCP 连接会被当成重复连接丢掉。
+        if (address.isLoopbackAddress) {
+            val deviceId = identityPacket.getString("deviceId")
+            lastLoopbackConnectionTimeByDeviceId.remove(deviceId) // kdeconnect+：只撤销回环包的登记
+            customDeviceRetry.onLoopbackIdentity(deviceId)
+            return
+        }
 
         val tcpPort = identityPacket.getInt("tcpPort", MIN_PORT)
         if (tcpPort !in MIN_PORT..MAX_PORT) {
@@ -398,6 +437,7 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     @Synchronized
     private fun addOrUpdateLink(socket: SSLSocket, deviceInfo: DeviceInfo) {
         var linkCreated = false
+        var lanDowngraded = false // kdeconnect+：只在已有 LAN 被回环 socket 替换时立即探测
         val link = visibleDevices.computeIfAbsent(deviceInfo.id) {
             linkCreated = true
             LanLink(context, this, deviceInfo, socket)
@@ -414,9 +454,11 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
                 return
             }
             Log.d("KDE/LanLinkProvider", "Reusing same link for device ${deviceInfo.id}")
+            lanDowngraded = !link.isLoopback && socket.inetAddress.isLoopbackAddress // kdeconnect+
             link.reset(socket, deviceInfo)
             onDeviceInfoUpdated(deviceInfo)
         }
+        customDeviceRetry.onLinksChanged(lanDowngraded) // kdeconnect+：降级立即探测；reset 不改变可达性也要通知
     }
 
     @Synchronized
@@ -500,15 +542,24 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
         }
     }
 
-    private fun broadcastUdpIdentityPacket(network: Network?) {
+    // kdeconnect+：所有身份包发送入口共用 Android 17 局域网权限检查，包括绑定 LAN 的探测。
+    private fun canSendUdpIdentityPacket(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
             Log.w("LanLinkProvider", "Will not UDP broadcast, missing ACCESS_LOCAL_NETWORK permission")
-            return
+            return false
         }
+        return true
+    }
+
+    // kdeconnect+：customDevicesOnly 只发给自定义 IP，供定时重试使用
+    private fun broadcastUdpIdentityPacket(network: Network?, customDevicesOnly: Boolean = false) {
+        if (!canSendUdpIdentityPacket()) return // kdeconnect+：与直接发送入口共用检查
         ThreadHelper.execute {
             val ipList = ArrayList<InetAddress>()
-            if (TrustedNetworkHelper.isTrustedNetwork(context)) {
+            if (customDevicesOnly) {
+                // kdeconnect+：不在局域网里广播
+            } else if (TrustedNetworkHelper.isTrustedNetwork(context)) {
                 ipList.add(InetAddress.getByName("255.255.255.255")) // Default: broadcast.
             } else {
                 Log.i("LanLinkProvider", "Current network isn't trusted, not broadcasting")
@@ -523,6 +574,7 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
 
     @WorkerThread
     fun sendUdpIdentityPacket(ipList: List<InetAddress>, network: Network?) {
+        if (!canSendUdpIdentityPacket()) return // kdeconnect+：LAN 探测同样受局域网权限限制
         val tcpServer = tcpServer
         if (tcpServer?.isBound != true) {
             Log.i("LanLinkProvider", "Won't broadcast UDP packet if TCP socket is not ready yet")
@@ -592,10 +644,12 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
         }
 
         broadcastUdpIdentityPacket(null)
+        customDeviceRetry.start() // kdeconnect+
     }
 
     override fun onNetworkChange(network: Network?) {
         if (isStopped) return
+        if (network != null) customDeviceRetry.onLanNetworkChange() // kdeconnect+：真实网络事件不受官方广播限速影响
         if (SystemClock.elapsedRealtime() < lastBroadcast + DELAY_BETWEEN_BROADCASTS) {
             Log.i("LanLinkProvider", "onNetworkChange: relax cowboy")
             return
@@ -606,6 +660,8 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
         setupTcpListener()
 
         broadcastUdpIdentityPacket(network)
+        customDeviceRetry.onNetworkChange() // kdeconnect+：已发送发现广播，重置自定义 IP 重连
+        LoopbackPayloadAddress.clear() // kdeconnect+：网络变化后忘记旧载荷地址
         synchronized(mdnsDiscovery) {
             if (TrustedNetworkHelper.isTrustedNetwork(context)) {
                 mdnsDiscovery.startAnnouncing() // noop if already announcing
@@ -620,6 +676,7 @@ class LanLinkProvider(private val context: Context) : BaseLinkProvider() {
     override fun onStop() {
         //Log.i("KDE/LanLinkProvider", "onStop");
         isStopped = true
+        customDeviceRetry.stop() // kdeconnect+
         customDevicePreferences.unregisterOnSharedPreferenceChangeListener(customDeviceListener)
         synchronized(mdnsDiscovery) {
             mdnsDiscovery.stopAnnouncing()
