@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plus_shizuku_category" translatable="false">Shizuku</string>
+    <string name="plus_shizuku_enable">Sync clipboard automatically via Shizuku</string>
+    <string name="plus_shizuku_description">Reads the clipboard in the background through Shizuku (wireless debugging or root), and writes text sent from the computer through Shizuku too, for systems that block background clipboard writes. Android shows a \"Shell pasted from your clipboard\" notice the first time each new copy is read.</string>
+    <string name="plus_shizuku_status">Status</string>
+    <string name="plus_shizuku_access_notifications">Show system clipboard access notices</string>
+    <string name="plus_shizuku_access_notifications_summary">System-wide setting that affects every app. Available while Shizuku sync is running.</string>
+
+    <string name="plus_shizuku_state_disabled">Off</string>
+    <string name="plus_shizuku_state_unsupported_android">Not needed on Android 9 and older</string>
+    <string name="plus_shizuku_state_not_installed">Shizuku is not installed</string>
+    <string name="plus_shizuku_state_not_running">Shizuku is not running. After starting it, open KDE Connect+ once to reconnect</string>
+    <string name="plus_shizuku_state_outdated">Shizuku is too old; update to v13 or newer</string>
+    <string name="plus_shizuku_state_permission_required">Tap to grant the Shizuku permission</string>
+    <string name="plus_shizuku_state_permission_denied">Shizuku permission denied; allow it in the Shizuku app</string>
+    <string name="plus_shizuku_state_unsupported_mode">Unsupported Shizuku mode</string>
+    <string name="plus_shizuku_state_connecting">Connecting…</string>
+    <string name="plus_shizuku_state_ready_shell">Running (wireless debugging / adb mode)</string>
+    <string name="plus_shizuku_state_ready_root">Running (root mode)</string>
+    <string name="plus_shizuku_state_error">Failed to start (code %d)</string>
+</resources>

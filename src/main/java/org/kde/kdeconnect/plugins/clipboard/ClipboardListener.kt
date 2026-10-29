@@ -14,8 +14,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.getSystemService
+import org.kde.kdeconnect.BackgroundService
 import org.kde.kdeconnect.helpers.ThreadHelper.execute
 import org.kde.kdeconnect_tp.BuildConfig
+import top.miceworld.kdeconnectplus.shizuku.ClipContent
+import top.miceworld.kdeconnectplus.shizuku.ShizukuClipboard
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.text.SimpleDateFormat
@@ -48,8 +51,14 @@ class ClipboardListener {
         context = ctx.applicationContext
         Handler(Looper.getMainLooper()).post {
             cm = context.getSystemService<ClipboardManager>()!!
-            cm.addPrimaryClipChangedListener { this.onClipboardChanged() }
+            // kdeconnect+：Shizuku 就绪时由它读取，官方的读取在后台只会被系统拒绝
+            cm.addPrimaryClipChangedListener { if (!ShizukuClipboard.isReady) this.onClipboardChanged() }
         }
+        // kdeconnect+：通过 Shizuku 在后台读剪贴板
+        ShizukuClipboard.init(context) { content, sensitive ->
+            publish(content, if (sensitive) ClipboardContentType.Password else ClipboardContentType.Text)
+        }
+        ShizukuClipboard.addStateListener { BackgroundService.instance?.updateForegroundNotification() }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ClipboardPlugin.canSyncAutomatically(context)) {
             execute {
                 try {
@@ -59,7 +68,7 @@ class ClipboardListener {
                     val process = Runtime.getRuntime().exec(arrayOf<String>("logcat", "-T", timeStamp, logcatFilter, "*:S"))
                     val bufferedReader = BufferedReader(InputStreamReader(process.inputStream))
                     bufferedReader.forEachLine { line ->
-                        if (line.contains(BuildConfig.APPLICATION_ID)) {
+                        if (line.contains(BuildConfig.APPLICATION_ID) && !ShizukuClipboard.isReady) {
                             context.startActivity(ClipboardFloatingActivity.getIntent(context, false))
                         }
                     }
@@ -82,19 +91,22 @@ class ClipboardListener {
             val item = clip.getItemAt(0)
             val content = item.coerceToText(context).toString()
             val contentType = detectContentType(clip)
-
-            if (content == currentContent && contentType == currentContentType) {
-                return
-            }
-            updateTimestamp = System.currentTimeMillis()
-            currentContent = content
-            currentContentType = contentType
-
-            for (observer in observers) {
-                observer.clipboardChanged(content, contentType)
-            }
+            publish(content, contentType)
         } catch (_: Exception) {
             //Probably clipboard was not text
+        }
+    }
+
+    private fun publish(content: String, contentType: ClipboardContentType) {
+        if (content == currentContent && contentType == currentContentType) {
+            return
+        }
+        updateTimestamp = System.currentTimeMillis()
+        currentContent = content
+        currentContentType = contentType
+
+        for (observer in observers) {
+            observer.clipboardChanged(content, contentType)
         }
     }
 
@@ -106,7 +118,10 @@ class ClipboardListener {
             updateTimestamp = System.currentTimeMillis()
             currentContent = text
             currentContentType = ClipboardContentType.Text
-            cm.setPrimaryClip(ClipData.newPlainText(null, text))
+            // kdeconnect+：优先经 Shizuku 以 shell 身份写入（ColorOS 等会拦截后台应用写剪贴板）
+            if (text == null || !ShizukuClipboard.setText(text)) {
+                cm.setPrimaryClip(ClipData.newPlainText(null, text).also(ClipContent::markFromRemote))
+            }
         }
     }
 
