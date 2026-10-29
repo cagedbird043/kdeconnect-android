@@ -116,6 +116,16 @@ android {
         }
         buildTypes.getByName("release").signingConfig = plusSigning
     }
+    buildFeatures.aidl = true
+    sourceSets.getByName("main") {
+        kotlin.directories += "plus/shizuku-clipboard/src/main/java"
+        aidl.directories += "plus/shizuku-clipboard/src/main/aidl"
+        res.directories += "plus/shizuku-clipboard/src/main/res"
+    }
+    sourceSets.getByName("test") {
+        kotlin.directories += "plus/shizuku-clipboard/src/test/java"
+    }
+    buildTypes.getByName("release").proguardFiles("plus/shizuku-clipboard/proguard-rules.pro")
 }
 
 /**
@@ -366,4 +376,10 @@ tasks.named("generateLicenseReport") {
 
 tasks.named("preBuild") {
     dependsOn("generateLicenseReport")
+}
+
+// kdeconnect+：Shizuku 剪贴板，源码在 plus/shizuku-clipboard，规则见 PLUS.md
+dependencies {
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }

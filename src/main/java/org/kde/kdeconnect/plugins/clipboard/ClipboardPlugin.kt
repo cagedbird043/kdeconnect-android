@@ -22,6 +22,7 @@ import org.kde.kdeconnect.plugins.PluginFactory.LoadablePlugin
 import org.kde.kdeconnect.plugins.clipboard.ClipboardListener.ClipboardObserver
 import org.kde.kdeconnect.ui.PluginSettingsFragment
 import org.kde.kdeconnect_tp.R
+import top.miceworld.kdeconnectplus.shizuku.ShizukuClipboard
 
 @LoadablePlugin
 class ClipboardPlugin : Plugin() {
@@ -36,7 +37,7 @@ class ClipboardPlugin : Plugin() {
     override val settingsScope = SettingsScope.PER_DEVICE
 
     override fun getSettingsFragment(activity: Activity): PluginSettingsFragment {
-        return PluginSettingsFragment.newInstance(pluginKey, device.deviceId, R.xml.clipboardplugin_preferences)
+        return ClipboardSettingsFragment.newInstance(pluginKey, device.deviceId)
     }
 
     override fun onPacketReceived(np: NetworkPacket): Boolean {
@@ -179,6 +180,10 @@ class ClipboardPlugin : Plugin() {
 
         fun canSyncAutomatically(context: Context): Boolean {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                return true
+            }
+            // kdeconnect+：Shizuku 就绪时可以在后台读剪贴板
+            if (ShizukuClipboard.isReady) {
                 return true
             }
             // Check if hack to read clipboard changes from logs is enabled
