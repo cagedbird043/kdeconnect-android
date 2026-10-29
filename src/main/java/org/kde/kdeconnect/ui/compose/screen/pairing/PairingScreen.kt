@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -51,6 +52,7 @@ import org.kde.kdeconnect.ui.compose.components.KdeThemePreviews
 import org.kde.kdeconnect.ui.compose.components.SectionHeader
 import org.kde.kdeconnect.ui.compose.model.device.DeviceUiModel
 import org.kde.kdeconnect_tp.R
+import top.miceworld.kdeconnectplus.reconnect.ReconnectButton
 
 @Composable
 fun PairingScreen(
@@ -160,10 +162,14 @@ private fun PairingScreenContent(
                 itemsIndexed(
                     items = uiState.remembered,
                     key = { _, rememberedDevice -> rememberedDevice.id }) { _, rememberedDevice ->
-                    CardContent(
-                        device = rememberedDevice,
-                        onClick = onClick
-                    )
+                    // kdeconnect+：没连上的已配对设备旁边加“重连”按钮，不用再下拉刷新
+                    Box(contentAlignment = Alignment.CenterEnd) {
+                        CardContent(
+                            device = rememberedDevice,
+                            onClick = onClick
+                        )
+                        ReconnectButton(modifier = Modifier.padding(end = 16.dp))
+                    }
                 }
             }
         }

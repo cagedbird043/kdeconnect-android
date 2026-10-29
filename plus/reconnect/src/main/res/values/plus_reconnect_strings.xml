@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plus_reconnect">Reconnect</string>
+    <string name="plus_reconnecting">Connecting…</string>
+</resources>
