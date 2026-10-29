@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plus_shizuku_enable">通过 Shizuku 自动同步剪贴板</string>
+    <string name="plus_shizuku_description">通过 Shizuku（无线调试或 root）在后台读取剪贴板。每条新复制的内容第一次被读取时，系统会提示“Shell 已粘贴”。</string>
+    <string name="plus_shizuku_status">状态</string>
+    <string name="plus_shizuku_access_notifications">显示系统剪贴板访问提示</string>
+    <string name="plus_shizuku_access_notifications_summary">系统全局设置，会影响所有应用。Shizuku 同步运行时可用。</string>
+
+    <string name="plus_shizuku_state_disabled">已关闭</string>
+    <string name="plus_shizuku_state_unsupported_android">Android 9 及以下不需要此功能</string>
+    <string name="plus_shizuku_state_not_installed">未安装 Shizuku</string>
+    <string name="plus_shizuku_state_not_running">Shizuku 未运行。启动 Shizuku 后，打开一次 KDE Connect+ 即可重新连接</string>
+    <string name="plus_shizuku_state_outdated">Shizuku 版本过旧，请升级到 v13 或更新版本</string>
+    <string name="plus_shizuku_state_permission_required">点此授予 Shizuku 权限</string>
+    <string name="plus_shizuku_state_permission_denied">Shizuku 权限已被拒绝，请在 Shizuku 中允许</string>
+    <string name="plus_shizuku_state_unsupported_mode">不支持的 Shizuku 模式</string>
+    <string name="plus_shizuku_state_connecting">正在连接…</string>
+    <string name="plus_shizuku_state_ready_shell">运行中（无线调试 / adb 模式）</string>
+    <string name="plus_shizuku_state_ready_root">运行中（root 模式）</string>
+    <string name="plus_shizuku_state_error">启动失败（代码 %d）</string>
+</resources>
